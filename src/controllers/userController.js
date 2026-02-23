@@ -90,12 +90,17 @@ exports.updateProfile = async (req, res) => {
         distrito: location.distrito || user.location?.distrito,
         referencia: location.referencia || user.location?.referencia,
       };
-      // Guardar coordenadas GeoJSON si vienen
+      // Guardar coordenadas GeoJSON solo si vienen [lng, lat] válidos.
+      // Si no vienen, se omite el sub-objeto para no generar GeoJSON inválido
+      // que rompería el índice 2dsphere.
       if (location.coordinates && Array.isArray(location.coordinates) && location.coordinates.length === 2) {
         user.location.coordinates = {
           type: 'Point',
           coordinates: location.coordinates  // [lng, lat]
         };
+      } else {
+        // Limpiar coordenadas si existían previamente y ahora no vienen
+        user.location.coordinates = undefined;
       }
     }
 

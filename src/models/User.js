@@ -48,8 +48,10 @@ const userSchema = new mongoose.Schema(
       distrito: { type: String, default: null },
       referencia: { type: String, default: null },  // Dirección aproximada
       // GeoJSON Point para queries geoespaciales
+      // IMPORTANTE: no poner default en 'type' para evitar crear { type: 'Point' }
+      // sin el array coordinates, lo que rompe el índice 2dsphere.
       coordinates: {
-        type: { type: String, enum: ['Point'], default: 'Point' },
+        type: { type: String, enum: ['Point'] },
         coordinates: { type: [Number], default: undefined }  // [lng, lat]
       }
     },
@@ -112,7 +114,9 @@ userSchema.index({ 'location.departamento': 1 });
 userSchema.index({ 'location.provincia': 1 });
 userSchema.index({ 'location.distrito': 1 });
 userSchema.index({ verified: 1 });
-userSchema.index({ 'location.coordinates': '2dsphere' });
+// sparse: true → MongoDB omite del índice los documentos donde coordinates es null/undefined.
+// Sin esto, un documento con { type: 'Point' } sin array coordinates rompe el índice 2dsphere.
+userSchema.index({ 'location.coordinates': '2dsphere' }, { sparse: true });
 
 // Método para verificar si el usuario tiene un rol específico
 userSchema.methods.hasRole = function(roles) {
