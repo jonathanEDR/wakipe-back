@@ -1,0 +1,48 @@
+# ═══════════════════════════════════════════════════════════
+#   WAKIPE BACKEND — Render Blueprint
+#   Documentación: https://render.com/docs/blueprint-spec
+# ═══════════════════════════════════════════════════════════
+
+services:
+  - type: web
+    name: wakipe-backend
+    env: node
+    plan: free          # Cambia a "starter" para instancia que no duerme
+    region: oregon      # us-west-2 — más cercano a América Latina
+
+    # Comandos
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+
+    # Health check — Render pingea esta ruta para verificar que el servicio está vivo
+    healthCheckPath: /
+
+    # Auto-deploy al hacer push al branch configurado
+    autoDeploy: true
+
+    # ─── Variables de entorno ────────────────────────────────
+    # Las marcadas con sync: false debes completarlas manualmente
+    # en el Dashboard de Render → Environment.
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # MongoDB Atlas — pega tu connection string completo
+      - key: MONGO_URI
+        sync: false
+
+      # Clerk Secret Key — sk_live_...
+      - key: CLERK_SECRET_KEY
+        sync: false
+
+      # Cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      # URL del frontend en Vercel (para CORS)
+      - key: FRONTEND_URL
+        value: https://wakipe.vercel.app

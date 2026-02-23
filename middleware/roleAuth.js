@@ -153,6 +153,40 @@ const requireSuperAdmin = async (req, res, next) => {
 };
 
 /**
+ * Middleware que carga el usuario autenticado desde MongoDB y lo pone en req.user.
+ * Retorna 401 si no hay sesión o 404 si el usuario no existe en la DB.
+ * Usar en rutas que requieren usuario pero no un rol específico.
+ */
+const requireUser = async (req, res, next) => {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'No autenticado'
+      });
+    }
+
+    const user = await User.findOne({ clerkId: req.userId });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('Error en requireUser middleware:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al cargar usuario'
+    });
+  }
+};
+
+/**
  * Middleware opcional que carga el usuario pero no requiere rol específico
  * Útil para rutas que necesitan info del usuario pero son accesibles a todos
  */
@@ -173,6 +207,7 @@ const loadUser = async (req, res, next) => {
 
 module.exports = {
   requireRole,
+  requireUser,
   requireAdmin,
   requireSuperAdmin,
   loadUser

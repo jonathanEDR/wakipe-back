@@ -1,8 +1,11 @@
 {
-  "name": "proinnovate-backend",
+  "name": "wakipe-backend",
   "version": "1.0.0",
-  "description": "Backend API para ProInnovate",
+  "description": "Backend API para Wakipe — Red Social Agrícola",
   "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js"
@@ -12,10 +15,14 @@
   "license": "ISC",
   "dependencies": {
     "@clerk/clerk-sdk-node": "^4.13.23",
+    "cloudinary": "^1.41.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "mongoose": "^9.2.1"
+    "mongoose": "^9.2.1",
+    "multer": "^2.0.2",
+    "multer-storage-cloudinary": "^4.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

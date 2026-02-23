@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const notificationService = require('../services/notificationService');
 
 // ============================================
 // GESTIÓN DE ROLES Y ONBOARDING
@@ -25,10 +26,14 @@ exports.setRole = async (req, res) => {
     let user = await User.findOne({ clerkId: req.userId });
     
     if (!user) {
-      // Si no existe, crear usuario con el rol
+      // Usuario nuevo: crear con datos de Clerk disponibles en req (via clerkAuth middleware)
+      const fullName = [req.userFirstName, req.userLastName].filter(Boolean).join(' ')
+
       user = new User({
         clerkId: req.userId,
         email: req.userEmail,
+        name: fullName || null,
+        avatar: req.userAvatar || null,
         role
       });
     } else {
@@ -83,8 +88,15 @@ exports.updateProfile = async (req, res) => {
         departamento: location.departamento || user.location?.departamento,
         provincia: location.provincia || user.location?.provincia,
         distrito: location.distrito || user.location?.distrito,
-        referencia: location.referencia || user.location?.referencia
+        referencia: location.referencia || user.location?.referencia,
       };
+      // Guardar coordenadas GeoJSON si vienen
+      if (location.coordinates && Array.isArray(location.coordinates) && location.coordinates.length === 2) {
+        user.location.coordinates = {
+          type: 'Point',
+          coordinates: location.coordinates  // [lng, lat]
+        };
+      }
     }
 
     // Campos específicos según el rol
@@ -191,6 +203,20 @@ exports.verifyUser = async (req, res) => {
     }
 
     await userToVerify.save();
+
+    // ── Notificar al usuario sobre su verificación ──────────────────────
+    try {
+      if (verified) {
+        await notificationService.createFromTemplate(
+          userToVerify._id,
+          'usuario_verificado',
+          {},
+          { verifiedBy: req.user._id }
+        )
+      }
+    } catch (err) {
+      console.error('[Users] Error al notificar verificación:', err.message)
+    }
     
     res.json({
       success: true,
@@ -236,6 +262,20 @@ exports.banUser = async (req, res) => {
     userToBan.bannedReason = banned ? reason : null;
     
     await userToBan.save();
+
+    // ── Notificar al usuario sobre ban/unban ────────────────────────────
+    try {
+      if (banned) {
+        await notificationService.createFromTemplate(
+          userToBan._id,
+          'usuario_baneado',
+          { reason: reason || null },
+          { bannedBy: req.user._id }
+        )
+      }
+    } catch (err) {
+      console.error('[Users] Error al notificar ban:', err.message)
+    }
     
     res.json({
       success: true,

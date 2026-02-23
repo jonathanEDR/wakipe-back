@@ -46,7 +46,12 @@ const userSchema = new mongoose.Schema(
       departamento: { type: String, default: null },
       provincia: { type: String, default: null },
       distrito: { type: String, default: null },
-      referencia: { type: String, default: null }  // Dirección aproximada
+      referencia: { type: String, default: null },  // Dirección aproximada
+      // GeoJSON Point para queries geoespaciales
+      coordinates: {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: undefined }  // [lng, lat]
+      }
     },
     
     // Campos específicos para PRODUCTOR
@@ -107,6 +112,7 @@ userSchema.index({ 'location.departamento': 1 });
 userSchema.index({ 'location.provincia': 1 });
 userSchema.index({ 'location.distrito': 1 });
 userSchema.index({ verified: 1 });
+userSchema.index({ 'location.coordinates': '2dsphere' });
 
 // Método para verificar si el usuario tiene un rol específico
 userSchema.methods.hasRole = function(roles) {
