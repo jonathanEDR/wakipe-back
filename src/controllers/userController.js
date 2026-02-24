@@ -79,10 +79,11 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Campos comunes para todos los roles
-    const { name, avatar, location } = req.body;
+    const { name, avatar, phone, location } = req.body;
     
     if (name) user.name = name;
     if (avatar) user.avatar = avatar;
+    if (phone !== undefined) user.phone = phone || null;
     if (location) {
       user.location = {
         departamento: location.departamento || user.location?.departamento,
@@ -403,6 +404,24 @@ exports.getMyProfile = async (req, res) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+/**
+ * Obtener perfil público de un usuario por ID
+ * GET /api/users/:id
+ */
+exports.getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select(
+      '-clerkId -isBanned -bannedReason -verifiedBy'
+    );
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    }
+    res.json({ success: true, data: user });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

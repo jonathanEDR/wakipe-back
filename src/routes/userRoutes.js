@@ -37,6 +37,8 @@ router.put("/profile", requireAuth, getUser, loadUser, userController.updateProf
 // ============================================
 
 // Verificar/desverificar usuario
+router.get("/:id/public", userController.getUserById);
+
 router.put("/:id/verify", requireAuth, getUser, requireAdmin, userController.verifyUser);
 
 // ============================================

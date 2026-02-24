@@ -115,6 +115,7 @@ exports.getPublications = async (req, res) => {
       departamento,
       provincia,
       distrito,
+      author,      // filtrar por autor (userId)
       lat,         // filtro geoespacial: latitud del usuario
       lng,         // filtro geoespacial: longitud del usuario
       maxDistance,  // radio en km (default sin límite)
@@ -128,6 +129,7 @@ exports.getPublications = async (req, res) => {
 
     if (type && ['oferta', 'demanda'].includes(type)) filter.type = type
     if (product) filter.product = { $regex: product, $options: 'i' }
+    if (author) filter.author = author
     if (status) filter.status = status
     else filter.status = { $ne: 'cerrado' }  // por defecto no mostrar cerradas
     if (departamento) filter['location.departamento'] = departamento

@@ -54,27 +54,58 @@ async function nominatimFetch(url) {
   return response.json()
 }
 
+// ── Helper: limpiar prefijos administrativos de Nominatim ──────────────────
+function cleanAdminName(name) {
+  if (!name) return null
+  // Nominatim a veces devuelve "Región de X", "Departamento de X", etc.
+  return name
+    .replace(/^(Región|Region|Departamento|Provincia|Distrito|Province|District)\s+de\s+/i, '')
+    .trim()
+}
+
 // ── Helper: Extraer departamento/provincia/distrito de Nominatim ────────────
 function extractLocationParts(address) {
-  // Nominatim devuelve campos variables según el lugar
-  // Para Perú: region ≈ departamento, province ≈ provincia, 
-  //            city/town/village/county ≈ distrito
-  const departamento =
-    address.region ||
-    address.state ||
-    null
+  /*
+   * Nominatim Perú — campos observados en campo real:
+   *
+   *   state  → Departamento  (siempre presente, más confiable)
+   *   region → Departamento O Provincia según la localidad:
+   *            • Si region !== state → region ES la Provincia  (ej: San Martín/Moyobamba)
+   *            • Si region  == state → la provincia comparte nombre con el dpto.
+   *   county  / province → NUNCA aparecen para Perú en Nominatim
+   *   state_district → Aparece en Lima Metropolitana y similares
+   *   city / town / village / hamlet / suburb → Distrito
+   */
 
-  const provincia =
-    address.province ||
-    address.county ||
-    null
+  const rawState  = address.state  || address.region || null
+  const rawRegion = address.region || null
+
+  const departamento = cleanAdminName(rawState)
+
+  // Provincia: cuando region ≠ state → region es la provincia
+  // Cuando son iguales o faltan → la prov. tiene el mismo nombre que el dpto.
+  let provincia = cleanAdminName(address.province) ||
+                  cleanAdminName(address.county)   ||
+                  null
+
+  if (!provincia) {
+    if (rawRegion && rawState && rawRegion !== rawState) {
+      // Nominatim distingue: state=Departamento, region=Provincia
+      provincia = cleanAdminName(rawRegion)
+    } else {
+      // Capital de provincia = mismo nombre que departamento
+      // Usar state_district si existe (ej: Lima Metropolitana → Lima)
+      provincia = cleanAdminName(address.state_district) || departamento
+    }
+  }
 
   const distrito =
-    address.city ||
-    address.town ||
-    address.village ||
-    address.hamlet ||
-    address.suburb ||
+    cleanAdminName(address.city)         ||
+    cleanAdminName(address.town)         ||
+    cleanAdminName(address.village)      ||
+    cleanAdminName(address.hamlet)       ||
+    cleanAdminName(address.city_district)||
+    cleanAdminName(address.suburb)       ||
     null
 
   return { departamento, provincia, distrito }

@@ -81,6 +81,13 @@ const userSchema = new mongoose.Schema(
       default: []
     },
     
+    // Contacto
+    phone: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
     // Campos heredados (mantener compatibilidad)
     age: {
       type: Number,
