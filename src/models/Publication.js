@@ -73,8 +73,15 @@ const publicationSchema = new mongoose.Schema(
     // Estado del ciclo de vida
     status: {
       type: String,
-      enum: ['disponible', 'en_conversacion', 'acordado', 'cerrado'],
+      enum: ['disponible', 'en_conversacion', 'reservado', 'acordado', 'cerrado'],
       default: 'disponible',
+    },
+
+    // Acuerdo confirmado (se llena al usar /agree)
+    agreedWith: {
+      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      conversation: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation', default: null },
+      agreedAt: { type: Date, default: null },
     },
 
     // Descripción libre

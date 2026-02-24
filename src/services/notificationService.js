@@ -48,6 +48,38 @@ const TEMPLATES = {
     link: '/dashboard/user/mensajes'
   }),
 
+  publicacion_reservada: ({ product }) => ({
+    title: 'Publicación reservada 🔒',
+    body: `Tu solicitud para "${product}" ha sido marcada como reservada`,
+    icon: '🔒',
+    priority: 'high',
+    link: '/dashboard/user/mensajes'
+  }),
+
+  acuerdo_confirmado: ({ product }) => ({
+    title: '¡Acuerdo confirmado! 🎉',
+    body: `¡Felicidades! El acuerdo para "${product}" ha sido confirmado`,
+    icon: '🎉',
+    priority: 'high',
+    link: '/dashboard/user/mensajes'
+  }),
+
+  otros_interesados_cerrados: ({ product }) => ({
+    title: 'Publicación acordada con otro usuario 📋',
+    body: `La publicación "${product}" que consultaste llegó a un acuerdo con otro usuario`,
+    icon: '📋',
+    priority: 'normal',
+    link: '/dashboard/user/mensajes'
+  }),
+
+  conversacion_cerrada: ({ product, reason }) => ({
+    title: 'Conversación cerrada 🔚',
+    body: `La conversación sobre "${product}" fue cerrada${reason && reason !== 'otro' ? `: ${reason.replace('_', ' ')}` : ''}`,
+    icon: '🔚',
+    priority: 'normal',
+    link: '/dashboard/user/mensajes'
+  }),
+
   publicacion_acordada: ({ product, quantity, unit }) => ({
     title: 'Publicación acordada ✅',
     body: `Tu publicación de ${product} (${quantity} ${unit}) fue marcada como acordada`,

@@ -68,6 +68,23 @@ const conversationSchema = new mongoose.Schema(
       default: 'activo',
     },
 
+    // Cierre enriquecido
+    closedAt: { type: Date, default: null },
+    closedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    closedReason: {
+      type: String,
+      enum: ['acordado', 'no_acuerdo', 'sin_respuesta', 'spam', 'otro', null],
+      default: null,
+    },
+    isAgreed: {
+      type: Boolean,
+      default: false,
+    },
+
     // Contadores de mensajes no leídos por participante (Map userId → count)
     unreadCount: {
       type: Map,
@@ -84,6 +101,7 @@ const conversationSchema = new mongoose.Schema(
 conversationSchema.index({ participants: 1 })
 conversationSchema.index({ publication: 1 })
 conversationSchema.index({ 'lastMessage.date': -1 })
-conversationSchema.index({ participants: 1, publication: 1 }, { unique: true })
+// Índice compuesto NO único: permite múltiples interesados por publicación
+conversationSchema.index({ participants: 1, publication: 1 })
 
 module.exports = mongoose.model('Conversation', conversationSchema)

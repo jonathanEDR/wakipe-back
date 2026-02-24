@@ -33,18 +33,19 @@ const startConversation = async (req, res) => {
       })
     }
 
-    // Solo se puede conversar sobre publicaciones disponibles o en_conversacion
-    if (!['disponible', 'en_conversacion'].includes(publication.status)) {
+    // Solo se puede conversar sobre publicaciones disponibles, en_conversacion o reservado
+    if (!['disponible', 'en_conversacion', 'reservado'].includes(publication.status)) {
       return res.status(400).json({
         success: false,
         message: 'Esta publicación ya no está disponible',
       })
     }
 
-    // Verificar si ya existe una conversación entre estos participantes para esta publicación
+    // Verificar si ESTE USUARIO ya tiene conversación activa para esta publicación
     const existing = await Conversation.findOne({
       publication: publicationId,
-      participants: { $all: [user._id, publication.author._id] },
+      initiatedBy: user._id,
+      status: 'activo',
     })
 
     if (existing) {
@@ -78,7 +79,8 @@ const startConversation = async (req, res) => {
       ]),
     })
 
-    // Actualizar estado de la publicación si estaba disponible
+    // Marcar la publicación como en_conversacion si estaba disponible
+    // (indica que al menos un interesado contactó)
     if (publication.status === 'disponible') {
       publication.status = 'en_conversacion'
       await publication.save()
@@ -303,12 +305,15 @@ const sendMessage = async (req, res) => {
 
 /**
  * PATCH /api/conversations/:id/close
- * Cerrar una conversación.
+ * Cerrar una conversación con razón enriquecida.
+ * Body: { reason } — 'no_acuerdo' | 'sin_respuesta' | 'spam' | 'otro'
  */
 const closeConversation = async (req, res) => {
   try {
     const user = req.user
+    const { reason } = req.body || {}
     const conversation = await Conversation.findById(req.params.id)
+      .populate('publication')
 
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversación no encontrada' })
@@ -321,13 +326,300 @@ const closeConversation = async (req, res) => {
       return res.status(403).json({ success: false, message: 'No autorizado' })
     }
 
+    if (conversation.status === 'cerrado') {
+      return res.status(400).json({ success: false, message: 'La conversación ya está cerrada' })
+    }
+
+    // Cerrar con datos enriquecidos
     conversation.status = 'cerrado'
+    conversation.closedAt = new Date()
+    conversation.closedBy = user._id
+    conversation.closedReason = reason || 'otro'
     await conversation.save()
+
+    // Si no quedan conversaciones activas para la publicación → revertir a 'disponible'
+    if (conversation.publication) {
+      const activeCount = await Conversation.countDocuments({
+        publication: conversation.publication._id || conversation.publication,
+        status: 'activo',
+      })
+      if (activeCount === 0) {
+        const pub = await Publication.findById(conversation.publication._id || conversation.publication)
+        if (pub && ['en_conversacion', 'reservado'].includes(pub.status)) {
+          pub.status = 'disponible'
+          await pub.save()
+        }
+      }
+    }
+
+    // Notificar al otro participante
+    try {
+      const recipientId = conversation.participants.find(
+        pId => pId.toString() !== user._id.toString()
+      )
+      if (recipientId) {
+        const pub = conversation.publication
+        await notificationService.createFromTemplate(
+          recipientId,
+          'conversacion_cerrada',
+          {
+            product: pub?.product || 'publicación',
+            reason: reason || 'otro',
+          },
+          { conversationId: conversation._id, publicationId: pub?._id }
+        )
+      }
+    } catch (err) {
+      console.error('[Conversations] Error al notificar cierre:', err.message)
+    }
 
     res.json({ success: true, message: 'Conversación cerrada' })
   } catch (error) {
     console.error('Error closeConversation:', error)
     res.status(500).json({ success: false, message: 'Error al cerrar conversación' })
+  }
+}
+
+/**
+ * POST /api/conversations/:id/reserve
+ * El dueño de la publicación marca la publicación como reservada para este interesado.
+ */
+const reserveConversation = async (req, res) => {
+  try {
+    const user = req.user
+    const conversation = await Conversation.findById(req.params.id)
+      .populate('publication')
+
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversación no encontrada' })
+    }
+
+    if (conversation.status !== 'activo') {
+      return res.status(400).json({ success: false, message: 'La conversación no está activa' })
+    }
+
+    const publication = await Publication.findById(conversation.publication._id || conversation.publication)
+    if (!publication) {
+      return res.status(404).json({ success: false, message: 'Publicación no encontrada' })
+    }
+
+    // Solo el autor de la publicación puede reservar
+    if (publication.author.toString() !== user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Solo el dueño de la publicación puede reservar' })
+    }
+
+    // Validar transición
+    if (!['disponible', 'en_conversacion'].includes(publication.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `No se puede reservar desde estado "${publication.status}"`,
+      })
+    }
+
+    publication.status = 'reservado'
+    await publication.save()
+
+    // Notificar al interesado
+    try {
+      const interesadoId = conversation.participants.find(
+        pId => pId.toString() !== user._id.toString()
+      )
+      if (interesadoId) {
+        await notificationService.createFromTemplate(
+          interesadoId,
+          'publicacion_reservada',
+          { product: publication.product },
+          { conversationId: conversation._id, publicationId: publication._id }
+        )
+      }
+    } catch (err) {
+      console.error('[Conversations] Error al notificar reserva:', err.message)
+    }
+
+    res.json({
+      success: true,
+      message: `Publicación "${publication.product}" reservada`,
+      data: { publicationStatus: 'reservado' },
+    })
+  } catch (error) {
+    console.error('Error reserveConversation:', error)
+    res.status(500).json({ success: false, message: 'Error al reservar' })
+  }
+}
+
+/**
+ * POST /api/conversations/:id/agree
+ * El dueño de la publicación confirma el acuerdo con este interesado.
+ * - Marca la conversación como isAgreed
+ * - Cambia pub a 'acordado' con agreedWith
+ * - Cierra las demás conversaciones activas con closedReason: 'no_acuerdo'
+ */
+const agreeConversation = async (req, res) => {
+  try {
+    const user = req.user
+    const conversation = await Conversation.findById(req.params.id)
+
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversación no encontrada' })
+    }
+
+    if (conversation.status !== 'activo') {
+      return res.status(400).json({ success: false, message: 'La conversación no está activa' })
+    }
+
+    const publication = await Publication.findById(conversation.publication)
+    if (!publication) {
+      return res.status(404).json({ success: false, message: 'Publicación no encontrada' })
+    }
+
+    // Solo el autor de la publicación puede confirmar acuerdo
+    if (publication.author.toString() !== user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Solo el dueño de la publicación puede confirmar acuerdo' })
+    }
+
+    // Validar transición
+    if (!['en_conversacion', 'reservado'].includes(publication.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `No se puede acordar desde estado "${publication.status}"`,
+      })
+    }
+
+    // Identificar al interesado
+    const interesadoId = conversation.participants.find(
+      pId => pId.toString() !== user._id.toString()
+    )
+
+    // 1) Marcar esta conversación como acordada
+    conversation.isAgreed = true
+    conversation.status = 'cerrado'
+    conversation.closedAt = new Date()
+    conversation.closedBy = user._id
+    conversation.closedReason = 'acordado'
+    await conversation.save()
+
+    // 2) Actualizar publicación
+    publication.status = 'acordado'
+    publication.agreedWith = {
+      user: interesadoId,
+      conversation: conversation._id,
+      agreedAt: new Date(),
+    }
+    await publication.save()
+
+    // 3) Cerrar las demás conversaciones activas de esta publicación
+    const otherConversations = await Conversation.find({
+      publication: publication._id,
+      _id: { $ne: conversation._id },
+      status: 'activo',
+    })
+
+    for (const otherConv of otherConversations) {
+      otherConv.status = 'cerrado'
+      otherConv.closedAt = new Date()
+      otherConv.closedBy = user._id
+      otherConv.closedReason = 'no_acuerdo'
+      await otherConv.save()
+
+      // Notificar a los otros interesados
+      try {
+        const otherUserId = otherConv.participants.find(
+          pId => pId.toString() !== user._id.toString()
+        )
+        if (otherUserId) {
+          await notificationService.createFromTemplate(
+            otherUserId,
+            'otros_interesados_cerrados',
+            { product: publication.product },
+            { conversationId: otherConv._id, publicationId: publication._id }
+          )
+        }
+      } catch (err) {
+        console.error('[Conversations] Error al notificar cierre de otra conv:', err.message)
+      }
+    }
+
+    // 4) Notificar al interesado elegido
+    try {
+      if (interesadoId) {
+        await notificationService.createFromTemplate(
+          interesadoId,
+          'acuerdo_confirmado',
+          { product: publication.product },
+          { conversationId: conversation._id, publicationId: publication._id }
+        )
+      }
+    } catch (err) {
+      console.error('[Conversations] Error al notificar acuerdo:', err.message)
+    }
+
+    // 5) Notificar al autor también
+    try {
+      await notificationService.createFromTemplate(
+        user._id,
+        'publicacion_acordada',
+        { product: publication.product, quantity: publication.quantity, unit: publication.unit },
+        { publicationId: publication._id }
+      )
+    } catch (err) {
+      console.error('[Conversations] Error al notificar autor:', err.message)
+    }
+
+    res.json({
+      success: true,
+      message: `Acuerdo confirmado para "${publication.product}"`,
+      data: { publicationStatus: 'acordado', conversationId: conversation._id },
+    })
+  } catch (error) {
+    console.error('Error agreeConversation:', error)
+    res.status(500).json({ success: false, message: 'Error al confirmar acuerdo' })
+  }
+}
+
+/**
+ * GET /api/conversations/publication/:publicationId
+ * Lista las conversaciones activas ligadas a una publicación (solo para el autor).
+ */
+const getConversationsForPublication = async (req, res) => {
+  try {
+    const user = req.user
+    const { publicationId } = req.params
+
+    const publication = await Publication.findById(publicationId)
+    if (!publication) {
+      return res.status(404).json({ success: false, message: 'Publicación no encontrada' })
+    }
+
+    // Solo el autor puede ver los interesados
+    if (publication.author.toString() !== user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'No autorizado' })
+    }
+
+    const conversations = await Conversation.find({
+      publication: publicationId,
+    })
+      .populate('participants', 'name avatar role location institution verified')
+      .populate('initiatedBy', 'name avatar role')
+      .populate('lastMessage.sender', 'name')
+      .sort({ 'lastMessage.date': -1 })
+      .lean()
+
+    // Enriquecer con info del interesado
+    const enriched = conversations.map(conv => {
+      const interesado = conv.participants.find(
+        p => p._id.toString() !== user._id.toString()
+      )
+      return {
+        ...conv,
+        interesado,
+        myUnread: conv.unreadCount?.[user._id.toString()] || 0,
+      }
+    })
+
+    res.json({ success: true, data: enriched })
+  } catch (error) {
+    console.error('Error getConversationsForPublication:', error)
+    res.status(500).json({ success: false, message: 'Error al obtener interesados' })
   }
 }
 
@@ -363,4 +655,7 @@ module.exports = {
   sendMessage,
   closeConversation,
   getUnreadTotal,
+  reserveConversation,
+  agreeConversation,
+  getConversationsForPublication,
 }

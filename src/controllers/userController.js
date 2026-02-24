@@ -445,3 +445,34 @@ exports.getUsers = async (req, res) => {
     });
   }
 };
+
+/**
+ * Actualizar preferencias de matching
+ * PUT /api/users/match-preferences
+ */
+exports.updateMatchPreferences = async (req, res) => {
+  try {
+    const { maxDistance, notifyNewMatches, minMatchPercent, preferredProducts } = req.body;
+
+    const prefs = {};
+    if (maxDistance !== undefined) prefs['matchPreferences.maxDistance'] = Math.max(10, Math.min(500, Number(maxDistance)));
+    if (notifyNewMatches !== undefined) prefs['matchPreferences.notifyNewMatches'] = Boolean(notifyNewMatches);
+    if (minMatchPercent !== undefined) prefs['matchPreferences.minMatchPercent'] = Math.max(0, Math.min(100, Number(minMatchPercent)));
+    if (preferredProducts !== undefined) prefs['matchPreferences.preferredProducts'] = Array.isArray(preferredProducts) ? preferredProducts.slice(0, 20) : [];
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: prefs },
+      { new: true, runValidators: true }
+    ).select('matchPreferences');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+    }
+
+    res.json({ success: true, data: user.matchPreferences });
+  } catch (error) {
+    console.error('Error updateMatchPreferences:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

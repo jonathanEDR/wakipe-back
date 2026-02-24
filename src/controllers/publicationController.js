@@ -2,6 +2,7 @@ const Publication = require('../models/Publication')
 const User = require('../models/User')
 const { PRODUCTS, UNITS } = require('../config/constants')
 const notificationService = require('../services/notificationService')
+const { triggerReactiveMatching } = require('./matchingController')
 
 // ============================================
 // CREAR PUBLICACIÓN
@@ -90,6 +91,9 @@ exports.createPublication = async (req, res) => {
 
     // Populate author para la respuesta
     await publication.populate('author', 'name avatar role verified location institution')
+
+    // Disparar matching reactivo en background (no bloquea la respuesta)
+    setImmediate(() => triggerReactiveMatching(publication.toObject()).catch(console.error))
 
     res.status(201).json({
       success: true,
@@ -334,8 +338,9 @@ exports.updateStatus = async (req, res) => {
 
     const { status } = req.body
     const validTransitions = {
-      disponible:       ['en_conversacion', 'cerrado'],
-      en_conversacion:  ['acordado', 'disponible', 'cerrado'],
+      disponible:       ['en_conversacion', 'reservado', 'cerrado'],
+      en_conversacion:  ['disponible', 'reservado', 'cerrado'],
+      reservado:        ['acordado', 'disponible', 'cerrado'],
       acordado:         ['cerrado'],
       cerrado:          [],  // estado final
     }

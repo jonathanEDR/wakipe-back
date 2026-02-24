@@ -32,6 +32,9 @@ router.post("/role", requireAuth, getUser, userController.setRole);
 // Actualizar perfil según rol (requiere tener rol asignado)
 router.put("/profile", requireAuth, getUser, loadUser, userController.updateProfile);
 
+// Actualizar preferencias de matching
+router.put("/match-preferences", requireAuth, getUser, loadUser, userController.updateMatchPreferences);
+
 // ============================================
 // RUTAS DE ADMINISTRACIÓN (solo admin o super_admin)
 // ============================================

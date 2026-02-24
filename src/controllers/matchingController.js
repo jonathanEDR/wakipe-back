@@ -1,5 +1,6 @@
 const Publication = require('../models/Publication')
 const User = require('../models/User')
+const Conversation = require('../models/Conversation')
 const notificationService = require('../services/notificationService')
 
 // ── Helper: calcular distancia Haversine en km ──────────────────────────────
@@ -27,6 +28,39 @@ function distanceScore(km) {
   return { points: 0, label: null }
 }
 
+// ── Helper: conversión a kg y puntuación por compatibilidad de cantidad ──────
+const TO_KG = {
+  kg: 1,
+  toneladas: 1000,
+  quintales: 46,
+  arrobas: 11.5,
+  sacos: 50,
+  cajas: 20,
+  jabas: 20,
+  unidad: 0.5,
+}
+
+function qtyScore(pubQty, pubUnit, userQty, userUnit) {
+  const pubKg  = (pubQty  || 0) * (TO_KG[pubUnit]  || 1)
+  const userKg = (userQty || 0) * (TO_KG[userUnit] || 1)
+  if (!pubKg || !userKg) return { points: 0, ratio: 0 }
+  const ratio = Math.min(pubKg, userKg) / Math.max(pubKg, userKg)
+  if (ratio >= 0.8) return { points: 2, ratio: Math.round(ratio * 100) }
+  if (ratio >= 0.4) return { points: 1, ratio: Math.round(ratio * 100) }
+  return { points: 0, ratio: Math.round(ratio * 100) }
+}
+
+// ── Helper: calcular máximo puntaje alcanzable dinámicamente ─────────────────
+// Esto permite normalizar el % de match sin penalizar usuarios sin GPS o sin qty
+function calcMaxAchievable(hasGeo, hasQty) {
+  let max = 3  // producto (máx)
+  max += 1     // fecha
+  if (hasGeo) max += 4  // distancia geoespacial
+  else max += 3         // fallback texto: depto(2) + provincia(1)
+  if (hasQty) max += 2  // cantidad
+  return max   // máx 10 con geo+qty, 8 sin qty, 7 sin geo
+}
+
 /**
  * GET /api/matching/suggestions
  *
@@ -34,10 +68,11 @@ function distanceScore(km) {
  * - Si es productor (publica ofertas) → muestra demandas que coinciden
  * - Si es centro de acopio (publica demandas) → muestra ofertas que coinciden
  *
- * Puntuación (max 8 puntos):
+ * Puntuación (max 10 puntos — dinámico según datos disponibles):
  *   +3 mismo producto exacto
  *   +4/3/2/1 distancia geográfica (<10/<50/<100/<200 km)
  *       fallback: +2 mismo departamento, +1 misma provincia (sin coords)
+ *   +2/+1 compatibilidad de cantidad (ratio ≥80% / ≥40%)
  *   +1 fechas compatibles (±30 días)
  *
  * Query params:
@@ -45,6 +80,7 @@ function distanceScore(km) {
  *   ?product=Papa
  *   ?departamento=Cusco
  *   ?maxDistance=100       (km, solo si el usuario tiene coordenadas)
+ *   ?includeContacted=true  (incluir publicaciones ya contactadas)
  */
 const getSuggestions = async (req, res) => {
   try {
@@ -79,6 +115,11 @@ const getSuggestions = async (req, res) => {
     const myDates = myPublications
       .filter(p => p.availabilityDate)
       .map(p => new Date(p.availabilityDate).getTime())
+    // Cantidades de mis publicaciones para comparar
+    const myQtyMap = {} // { product: { qty, unit } }
+    myPublications.forEach(p => {
+      if (p.quantity && p.unit) myQtyMap[p.product] = { qty: p.quantity, unit: p.unit }
+    })
 
     // 3) Construir filtro base
     const filter = {
@@ -89,17 +130,31 @@ const getSuggestions = async (req, res) => {
     if (req.query.product) filter.product = req.query.product
     if (req.query.departamento) filter['location.departamento'] = req.query.departamento
 
-    // 4) Obtener candidatas
+    // 4) Excluir publicaciones ya contactadas (salvo que se pida explícitamente)
+    const includeContacted = req.query.includeContacted === 'true'
+    let excludedPubIds = new Set()
+    if (!includeContacted) {
+      const contactedIds = await Conversation.find({ participants: user._id })
+        .distinct('publication')
+      excludedPubIds = new Set(contactedIds.map(id => id.toString()))
+    }
+
+    // 5) Obtener candidatas
     const candidates = await Publication.find(filter)
       .populate('author', 'name avatar location institution role verified')
       .lean()
 
-    // 5) Puntuar y ordenar
-    const MAX_SCORE = 8
-    const scored = candidates.map(pub => {
+    // Filtrar las ya contactadas
+    const filteredCandidates = includeContacted
+      ? candidates
+      : candidates.filter(c => !excludedPubIds.has(c._id.toString()))
+
+    // 6) Puntuar y ordenar
+    const scored = filteredCandidates.map(pub => {
       let score = 0
       const reasons = []
       let distanceKm = null
+      let qtyRatio = null
 
       // Mismo producto (+3)
       if (myProducts.includes(pub.product)) {
@@ -109,7 +164,8 @@ const getSuggestions = async (req, res) => {
 
       // Distancia geoespacial
       const pubCoords = pub.location?.coordinates?.coordinates || null
-      if (myCoords && pubCoords && pubCoords.length === 2) {
+      const hasGeo = !!(myCoords && pubCoords && pubCoords.length === 2)
+      if (hasGeo) {
         distanceKm = Math.round(haversineKm(myCoords, pubCoords) * 10) / 10
         const ds = distanceScore(distanceKm)
         score += ds.points
@@ -126,6 +182,17 @@ const getSuggestions = async (req, res) => {
         }
       }
 
+      // Compatibilidad de cantidad (+2/+1)
+      const myQty = myQtyMap[pub.product]
+      const hasQty = !!(myQty && pub.quantity && pub.unit)
+      if (hasQty) {
+        const qs = qtyScore(pub.quantity, pub.unit, myQty.qty, myQty.unit)
+        score += qs.points
+        qtyRatio = qs.ratio
+        if (qs.points === 2) reasons.push('cantidad_ideal')
+        else if (qs.points === 1) reasons.push('cantidad_parcial')
+      }
+
       // Fechas compatibles (±30 días)
       if (pub.availabilityDate && myDates.length > 0) {
         const pubDate = new Date(pub.availabilityDate).getTime()
@@ -137,7 +204,8 @@ const getSuggestions = async (req, res) => {
         }
       }
 
-      const matchPercent = Math.round((score / MAX_SCORE) * 100)
+      const maxScore = calcMaxAchievable(hasGeo, hasQty)
+      const matchPercent = Math.round((score / maxScore) * 100)
 
       return {
         ...pub,
@@ -145,6 +213,7 @@ const getSuggestions = async (req, res) => {
         matchPercent,
         matchReasons: reasons,
         distanceKm,
+        qtyRatio,
       }
     })
 
@@ -217,7 +286,16 @@ const getMatchesForPublication = async (req, res) => {
 
     const searchType = publication.type === 'oferta' ? 'demanda' : 'oferta'
 
-    const candidates = await Publication.find({
+    // Excluir publicaciones ya contactadas (salvo que se pida)
+    const includeContacted = req.query?.includeContacted === 'true'
+    let excludedPubIds = new Set()
+    if (!includeContacted) {
+      const contactedIds = await Conversation.find({ participants: user._id })
+        .distinct('publication')
+      excludedPubIds = new Set(contactedIds.map(id => id.toString()))
+    }
+
+    const allCandidates = await Publication.find({
       type: searchType,
       status: 'disponible',
       author: { $ne: user._id },
@@ -225,24 +303,29 @@ const getMatchesForPublication = async (req, res) => {
       .populate('author', 'name avatar location institution role verified')
       .lean()
 
+    const candidates = includeContacted
+      ? allCandidates
+      : allCandidates.filter(c => !excludedPubIds.has(c._id.toString()))
+
     const pubCoords = publication.location?.coordinates?.coordinates || null
     const pubDate = publication.availabilityDate
       ? new Date(publication.availabilityDate).getTime()
       : null
     const thirtyDays = 30 * 24 * 60 * 60 * 1000
-    const MAX_SCORE = 8
 
     const scored = candidates.map(c => {
       let score = 0
       const reasons = []
       let distanceKm = null
+      let qtyRatio = null
 
       // Producto
       if (c.product === publication.product) { score += 3; reasons.push('mismo_producto') }
 
       // Distancia geoespacial
       const cCoords = c.location?.coordinates?.coordinates || null
-      if (pubCoords && cCoords && cCoords.length === 2) {
+      const hasGeo = !!(pubCoords && cCoords && cCoords.length === 2)
+      if (hasGeo) {
         distanceKm = Math.round(haversineKm(pubCoords, cCoords) * 10) / 10
         const ds = distanceScore(distanceKm)
         score += ds.points
@@ -257,13 +340,24 @@ const getMatchesForPublication = async (req, res) => {
         }
       }
 
+      // Compatibilidad de cantidad (+2/+1)
+      const hasQty = !!(publication.quantity && publication.unit && c.quantity && c.unit)
+      if (hasQty) {
+        const qs = qtyScore(c.quantity, c.unit, publication.quantity, publication.unit)
+        score += qs.points
+        qtyRatio = qs.ratio
+        if (qs.points === 2) reasons.push('cantidad_ideal')
+        else if (qs.points === 1) reasons.push('cantidad_parcial')
+      }
+
       // Fecha
       if (pubDate && c.availabilityDate) {
         const cDate = new Date(c.availabilityDate).getTime()
         if (Math.abs(pubDate - cDate) <= thirtyDays) { score += 1; reasons.push('fecha_compatible') }
       }
 
-      return { ...c, _score: score, matchPercent: Math.round((score / MAX_SCORE) * 100), matchReasons: reasons, distanceKm }
+      const maxScore = calcMaxAchievable(hasGeo, hasQty)
+      return { ...c, _score: score, matchPercent: Math.round((score / maxScore) * 100), matchReasons: reasons, distanceKm, qtyRatio }
     })
 
     const results = scored.filter(s => s._score > 0).sort((a, b) => b._score - a._score)
@@ -275,4 +369,106 @@ const getMatchesForPublication = async (req, res) => {
   }
 }
 
-module.exports = { getSuggestions, getMatchesForPublication }
+module.exports = { getSuggestions, getMatchesForPublication, triggerReactiveMatching }
+
+/**
+ * triggerReactiveMatching(publication)
+ *
+ * Disparado en background al crear una publicación.
+ * Busca usuarios con rol complementario que tengan publicaciones con productos coincidentes
+ * y les notifica si el matchPercent es ≥ 60%.
+ * Se llama con setImmediate() desde createPublication para no bloquear la respuesta.
+ */
+async function triggerReactiveMatching(pub) {
+  try {
+    // Rol complementario: si pub es oferta → buscar demandantes, y viceversa
+    const targetRole = pub.type === 'oferta' ? 'centro_acopio' : 'productor'
+    const complementaryType = pub.type === 'oferta' ? 'demanda' : 'oferta'
+
+    // Buscar publicaciones complementarias con el mismo producto
+    const complementaryPubs = await Publication.find({
+      type: complementaryType,
+      product: pub.product,
+      status: 'disponible',
+      author: { $ne: pub.author },
+    })
+      .populate('author', 'name location role')
+      .lean()
+
+    if (complementaryPubs.length === 0) return
+
+    // Agrupar por autor para no envisar duplicados
+    const authorMap = new Map()
+    const pubCoords = pub.location?.coordinates?.coordinates || null
+    const pubDate = pub.availabilityDate ? new Date(pub.availabilityDate).getTime() : null
+    const thirtyDays = 30 * 24 * 60 * 60 * 1000
+
+    for (const cp of complementaryPubs) {
+      const authorId = cp.author._id.toString()
+      if (authorMap.has(authorId)) continue // ya procesamos a este autor
+
+      let score = 0
+      // Producto ya coincide → +3
+      score += 3
+
+      // Distancia
+      const cpCoords = cp.location?.coordinates?.coordinates || null
+      const hasGeo = !!(pubCoords && cpCoords && cpCoords.length === 2)
+      let distanceKm = null
+      if (hasGeo) {
+        distanceKm = Math.round(haversineKm(pubCoords, cpCoords) * 10) / 10
+        score += distanceScore(distanceKm).points
+      } else {
+        if (pub.location?.departamento && cp.location?.departamento === pub.location.departamento) score += 2
+        if (pub.location?.provincia && cp.location?.provincia === pub.location.provincia) score += 1
+      }
+
+      // Cantidad
+      const hasQty = !!(pub.quantity && pub.unit && cp.quantity && cp.unit)
+      if (hasQty) {
+        score += qtyScore(cp.quantity, cp.unit, pub.quantity, pub.unit).points
+      }
+
+      // Fecha
+      if (pubDate && cp.availabilityDate) {
+        const cpDate = new Date(cp.availabilityDate).getTime()
+        if (Math.abs(pubDate - cpDate) <= thirtyDays) score += 1
+      }
+
+      const maxScore = calcMaxAchievable(hasGeo, hasQty)
+      const matchPercent = Math.round((score / maxScore) * 100)
+
+      if (matchPercent >= 60) {
+        authorMap.set(authorId, { userId: cp.author._id, matchPercent, distanceKm })
+      }
+    }
+
+    // Notificar a los mejores 10
+    const topMatches = [...authorMap.values()]
+      .sort((a, b) => b.matchPercent - a.matchPercent)
+      .slice(0, 10)
+
+    for (const match of topMatches) {
+      try {
+        await notificationService.createFromTemplate(
+          match.userId,
+          'nuevo_match',
+          {
+            product: pub.product,
+            distance: match.distanceKm,
+            matchScore: match.matchPercent,
+          },
+          { publicationId: pub._id }
+        )
+      } catch (err) {
+        console.error('[ReactiveMatching] Error al notificar:', err.message)
+      }
+    }
+
+    if (topMatches.length > 0) {
+      console.log(`[ReactiveMatching] Publicación ${pub._id}: ${topMatches.length} usuarios notificados`)
+    }
+  } catch (err) {
+    console.error('[ReactiveMatching] Error general:', err.message)
+  }
+}

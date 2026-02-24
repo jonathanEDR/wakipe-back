@@ -88,6 +88,14 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Preferencias de matching
+    matchPreferences: {
+      maxDistance:       { type: Number, default: 200 },
+      notifyNewMatches:  { type: Boolean, default: true },
+      minMatchPercent:   { type: Number, default: 30 },
+      preferredProducts: { type: [String], default: [] },
+    },
+
     // Campos heredados (mantener compatibilidad)
     age: {
       type: Number,
