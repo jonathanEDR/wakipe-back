@@ -19,6 +19,14 @@ const startConversation = async (req, res) => {
       })
     }
 
+    // SEGURIDAD: limitar longitud del mensaje inicial
+    if (message.trim().length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: 'El mensaje no puede exceder 1000 caracteres',
+      })
+    }
+
     // Validar publicación
     const publication = await Publication.findById(publicationId).populate('author')
     if (!publication) {
@@ -222,6 +230,11 @@ const sendMessage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'El mensaje no puede estar vacío' })
     }
 
+    // SEGURIDAD: limitar longitud del mensaje
+    if (text.trim().length > 1000) {
+      return res.status(400).json({ success: false, message: 'El mensaje no puede exceder 1000 caracteres' })
+    }
+
     const conversation = await Conversation.findById(req.params.id)
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversación no encontrada' })
@@ -331,10 +344,13 @@ const closeConversation = async (req, res) => {
     }
 
     // Cerrar con datos enriquecidos
+    const validReasons = ['no_acuerdo', 'sin_respuesta', 'spam', 'otro']
+    const safeReason = validReasons.includes(reason) ? reason : 'otro'
+
     conversation.status = 'cerrado'
     conversation.closedAt = new Date()
     conversation.closedBy = user._id
-    conversation.closedReason = reason || 'otro'
+    conversation.closedReason = safeReason
     await conversation.save()
 
     // Si no quedan conversaciones activas para la publicación → revertir a 'disponible'

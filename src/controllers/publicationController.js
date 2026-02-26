@@ -4,6 +4,11 @@ const { PRODUCTS, UNITS } = require('../config/constants')
 const notificationService = require('../services/notificationService')
 const { triggerReactiveMatching } = require('./matchingController')
 
+// Helper: escapar caracteres especiales de regex para prevenir ReDoS
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 // ============================================
 // CREAR PUBLICACIÓN
 // POST /api/publications
@@ -102,7 +107,7 @@ exports.createPublication = async (req, res) => {
     })
   } catch (error) {
     console.error('Error en createPublication:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al crear publicación' })
   }
 }
 
@@ -128,17 +133,23 @@ exports.getPublications = async (req, res) => {
       limit = 20,
     } = req.query
 
-    // Construir filtro
+    // Construir filtro con validación estricta (prevenir inyección NoSQL)
     const filter = {}
 
-    if (type && ['oferta', 'demanda'].includes(type)) filter.type = type
-    if (product) filter.product = { $regex: product, $options: 'i' }
-    if (author) filter.author = author
-    if (status) filter.status = status
+    const validTypes = ['oferta', 'demanda']
+    if (type && validTypes.includes(String(type))) filter.type = String(type)
+
+    if (product) filter.product = { $regex: escapeRegex(String(product)), $options: 'i' }
+
+    if (author && typeof author === 'string') filter.author = author
+
+    const validStatuses = ['disponible', 'en_conversacion', 'reservado', 'acordado', 'cerrado']
+    if (status && validStatuses.includes(String(status))) filter.status = String(status)
     else filter.status = { $ne: 'cerrado' }  // por defecto no mostrar cerradas
-    if (departamento) filter['location.departamento'] = departamento
-    if (provincia) filter['location.provincia'] = provincia
-    if (distrito) filter['location.distrito'] = distrito
+
+    if (departamento && typeof departamento === 'string') filter['location.departamento'] = String(departamento)
+    if (provincia && typeof provincia === 'string') filter['location.provincia'] = String(provincia)
+    if (distrito && typeof distrito === 'string') filter['location.distrito'] = String(distrito)
 
     // Filtro geoespacial: buscar dentro de un radio
     const hasGeo = lat && lng
@@ -160,14 +171,15 @@ exports.getPublications = async (req, res) => {
     if (sort === 'date') sortObj = { availabilityDate: 1 }
     if (sort === 'quantity') sortObj = { quantity: -1 }
 
-    const skip = (Number(page) - 1) * Number(limit)
+    const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20))
+    const skip = (Number(page) - 1) * safeLimit
 
     const [publications, total] = await Promise.all([
       Publication.find(filter)
         .populate('author', 'name avatar role verified location institution')
         .sort(sortObj)
         .skip(skip)
-        .limit(Number(limit)),
+        .limit(safeLimit),
       Publication.countDocuments(filter),
     ])
 
@@ -176,14 +188,14 @@ exports.getPublications = async (req, res) => {
       data: publications,
       pagination: {
         page: Number(page),
-        limit: Number(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / Number(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     })
   } catch (error) {
     console.error('Error en getPublications:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener publicaciones' })
   }
 }
 
@@ -200,15 +212,19 @@ exports.getMyPublications = async (req, res) => {
 
     const { status, page = 1, limit = 20 } = req.query
     const filter = { author: user._id }
-    if (status) filter.status = status
 
-    const skip = (Number(page) - 1) * Number(limit)
+    // Validar status contra whitelist
+    const validStatuses = ['disponible', 'en_conversacion', 'reservado', 'acordado', 'cerrado']
+    if (status && validStatuses.includes(String(status))) filter.status = String(status)
+
+    const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20))
+    const skip = (Number(page) - 1) * safeLimit
 
     const [publications, total] = await Promise.all([
       Publication.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit)),
+        .limit(safeLimit),
       Publication.countDocuments(filter),
     ])
 
@@ -217,14 +233,14 @@ exports.getMyPublications = async (req, res) => {
       data: publications,
       pagination: {
         page: Number(page),
-        limit: Number(limit),
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / Number(limit)),
+        pages: Math.ceil(total / safeLimit),
       },
     })
   } catch (error) {
     console.error('Error en getMyPublications:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener mis publicaciones' })
   }
 }
 
@@ -244,7 +260,7 @@ exports.getPublication = async (req, res) => {
     res.json({ success: true, data: publication })
   } catch (error) {
     console.error('Error en getPublication:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener publicación' })
   }
 }
 
@@ -309,7 +325,7 @@ exports.updatePublication = async (req, res) => {
     res.json({ success: true, message: 'Publicación actualizada', data: publication })
   } catch (error) {
     console.error('Error en updatePublication:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al actualizar publicación' })
   }
 }
 
@@ -384,7 +400,7 @@ exports.updateStatus = async (req, res) => {
     res.json({ success: true, message: `Estado cambiado a "${status}"`, data: publication })
   } catch (error) {
     console.error('Error en updateStatus:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al cambiar estado' })
   }
 }
 
@@ -415,6 +431,6 @@ exports.deletePublication = async (req, res) => {
     res.json({ success: true, message: 'Publicación eliminada' })
   } catch (error) {
     console.error('Error en deletePublication:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al eliminar publicación' })
   }
 }

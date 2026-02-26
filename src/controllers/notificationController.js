@@ -2,6 +2,11 @@ const Notification = require('../models/Notification')
 const notificationService = require('../services/notificationService')
 const User = require('../models/User')
 
+// Helper: escapar caracteres especiales de regex para prevenir ReDoS
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 // ── GET /api/notifications ──────────────────────────────────────────────────
 // Listar notificaciones del usuario autenticado (paginadas)
 // Query: ?page=1&limit=20&unreadOnly=false&type=nuevo_match
@@ -390,11 +395,12 @@ const adminGetAllNotifications = async (req, res) => {
     if (type)       filter.type = type
     if (unreadOnly) filter.read = false
 
-    // Filtro por texto en título/cuerpo
+    // Filtro por texto en título/cuerpo (regex escapado)
     if (search) {
+      const safeSearch = escapeRegex(search)
       filter.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { body:  { $regex: search, $options: 'i' } }
+        { title: { $regex: safeSearch, $options: 'i' } },
+        { body:  { $regex: safeSearch, $options: 'i' } }
       ]
     }
 

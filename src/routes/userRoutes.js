@@ -5,12 +5,14 @@ const { requireAuth, getUser } = require("../../middleware/clerkAuth");
 const { requireRole, requireAdmin, requireSuperAdmin, loadUser } = require("../../middleware/roleAuth");
 
 // ============================================
-// RUTAS PÚBLICAS (no requieren autenticación)
+// RUTAS PROTEGIDAS (requieren autenticación)
 // ============================================
-router.get("/all", userController.getUsers);
 
-// Obtener usuarios por rol (con filtros opcionales)
-router.get("/by-role/:role", userController.getUsersByRole);
+// Obtener todos los usuarios (solo autenticados)
+router.get("/all", requireAuth, getUser, userController.getUsers);
+
+// Obtener usuarios por rol (solo autenticados, con filtros opcionales)
+router.get("/by-role/:role", requireAuth, getUser, userController.getUsersByRole);
 
 // ============================================
 // RUTAS DE AUTENTICACIÓN BÁSICA (requieren Clerk auth)
@@ -40,7 +42,7 @@ router.put("/match-preferences", requireAuth, getUser, loadUser, userController.
 // ============================================
 
 // Verificar/desverificar usuario
-router.get("/:id/public", userController.getUserById);
+router.get("/:id/public", requireAuth, getUser, userController.getUserById);
 
 router.put("/:id/verify", requireAuth, getUser, requireAdmin, userController.verifyUser);
 

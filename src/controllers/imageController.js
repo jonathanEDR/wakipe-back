@@ -5,6 +5,8 @@
 
 const imageService = require('../services/imageService');
 const { cloudinary } = require('../config/cloudinary');
+const Publication = require('../models/Publication');
+const User = require('../models/User');
 
 /**
  * POST /api/images/upload
@@ -22,7 +24,14 @@ const uploadImage = async (req, res) => {
       return res.status(400).json({ success: false, message: validation.error });
     }
 
-    const folder = req.body.folder || 'general';
+    // SEGURIDAD: solo permitir carpetas predefinidas (whitelist)
+    const ALLOWED_FOLDERS = Object.keys(imageService.FOLDERS);
+    const folderKey = req.body.folder || 'general';
+    if (!ALLOWED_FOLDERS.includes(folderKey)) {
+      return res.status(400).json({ success: false, message: `Carpeta inválida. Opciones: ${ALLOWED_FOLDERS.join(', ')}` });
+    }
+
+    const folder = folderKey;
     const preset = req.body.preset || 'medium';
 
     const result = await imageService.upload(req.file.buffer, { folder, preset });
@@ -34,7 +43,7 @@ const uploadImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Error subiendo imagen:', error);
-    res.status(500).json({ success: false, message: 'Error al subir la imagen', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al subir la imagen' });
   }
 };
 
@@ -57,7 +66,14 @@ const uploadMultipleImages = async (req, res) => {
       }
     }
 
-    const folder = req.body.folder || 'general';
+    // SEGURIDAD: solo permitir carpetas predefinidas (whitelist)
+    const ALLOWED_FOLDERS = Object.keys(imageService.FOLDERS);
+    const folderKey = req.body.folder || 'general';
+    if (!ALLOWED_FOLDERS.includes(folderKey)) {
+      return res.status(400).json({ success: false, message: `Carpeta inválida. Opciones: ${ALLOWED_FOLDERS.join(', ')}` });
+    }
+
+    const folder = folderKey;
     const preset = req.body.preset || 'medium';
     const buffers = req.files.map(f => f.buffer);
 
@@ -70,7 +86,7 @@ const uploadMultipleImages = async (req, res) => {
     });
   } catch (error) {
     console.error('Error subiendo imágenes:', error);
-    res.status(500).json({ success: false, message: 'Error al subir las imágenes', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al subir las imágenes' });
   }
 };
 
@@ -86,6 +102,27 @@ const deleteImage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'publicId es requerido' });
     }
 
+    // SEGURIDAD: verificar que la imagen pertenece al usuario autenticado
+    const userId = req.userId;
+    const user = await User.findOne({ clerkId: userId });
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Usuario no encontrado' });
+    }
+
+    // Verificar propiedad: la imagen está en una publicación del usuario o es su avatar
+    const ownsInPublication = await Publication.findOne({
+      author: user._id,
+      'images.publicId': publicId,
+    });
+    const isOwnAvatar = user.avatar && user.avatar.includes(publicId);
+
+    if (!ownsInPublication && !isOwnAvatar) {
+      return res.status(403).json({
+        success: false,
+        message: 'No tienes permiso para eliminar esta imagen',
+      });
+    }
+
     const result = await imageService.destroy(publicId);
 
     res.status(200).json({
@@ -95,7 +132,7 @@ const deleteImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Error eliminando imagen:', error);
-    res.status(500).json({ success: false, message: 'Error al eliminar la imagen', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al eliminar la imagen' });
   }
 };
 
@@ -111,6 +148,27 @@ const deleteMultipleImages = async (req, res) => {
       return res.status(400).json({ success: false, message: 'publicIds es requerido (array)' });
     }
 
+    // SEGURIDAD: verificar propiedad de TODAS las imágenes
+    const user = await User.findOne({ clerkId: req.userId });
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Usuario no encontrado' });
+    }
+
+    for (const publicId of publicIds) {
+      const ownsInPublication = await Publication.findOne({
+        author: user._id,
+        'images.publicId': publicId,
+      });
+      const isOwnAvatar = user.avatar && user.avatar.includes(publicId);
+
+      if (!ownsInPublication && !isOwnAvatar) {
+        return res.status(403).json({
+          success: false,
+          message: `No tienes permiso para eliminar la imagen: ${publicId}`,
+        });
+      }
+    }
+
     const result = await imageService.destroyMultiple(publicIds);
 
     res.status(200).json({
@@ -120,7 +178,7 @@ const deleteMultipleImages = async (req, res) => {
     });
   } catch (error) {
     console.error('Error eliminando imágenes:', error);
-    res.status(500).json({ success: false, message: 'Error al eliminar las imágenes', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al eliminar las imágenes' });
   }
 };
 
@@ -146,13 +204,15 @@ const PROJECT_ROOT = 'wakipe';
 async function adminListImages(req, res) {
   try {
     const { folder, limit = 20, next_cursor } = req.query;
+
+    // SEGURIDAD: validar que la carpeta esté dentro del scope del proyecto
+    const safeFolder = folder && folder.startsWith(PROJECT_ROOT) ? folder : PROJECT_ROOT;
+
     const options = {
       type: 'upload',
       max_results: Math.min(parseInt(limit) || 20, 100),
       resource_type: 'image',
-      // Siempre restringir al prefijo del proyecto; si hay carpeta específica usarla,
-      // si no, mostrar todo lo que esté bajo wakipe/
-      prefix: folder || PROJECT_ROOT,
+      prefix: safeFolder,
     };
     if (next_cursor) options.next_cursor = next_cursor;
 
@@ -180,7 +240,7 @@ async function adminListImages(req, res) {
     });
   } catch (error) {
     console.error('Error listando imágenes (admin):', error);
-    res.status(500).json({ success: false, message: 'Error al listar imágenes', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al listar imágenes' });
   }
 }
 
@@ -242,7 +302,7 @@ async function adminGetStats(req, res) {
     });
   } catch (error) {
     console.error('Error obteniendo stats (admin):', error);
-    res.status(500).json({ success: false, message: 'Error al obtener estadísticas', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al obtener estadísticas' });
   }
 }
 
@@ -260,7 +320,7 @@ async function adminDeleteImage(req, res) {
     res.status(200).json({ success: true, message: 'Imagen eliminada por admin', data: result });
   } catch (error) {
     console.error('Error eliminando imagen (admin):', error);
-    res.status(500).json({ success: false, message: 'Error al eliminar', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al eliminar' });
   }
 }
 
@@ -278,6 +338,6 @@ async function adminDeleteMultiple(req, res) {
     res.status(200).json({ success: true, message: `${publicIds.length} imágenes eliminadas`, data: result });
   } catch (error) {
     console.error('Error eliminando imágenes (admin):', error);
-    res.status(500).json({ success: false, message: 'Error al eliminar', error: error.message });
+    res.status(500).json({ success: false, message: 'Error al eliminar' });
   }
 }

@@ -169,7 +169,7 @@ exports.reverseGeocode = async (req, res) => {
     res.json({ success: true, data })
   } catch (error) {
     console.error('Error en reverseGeocode:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error en geocodificación' })
   }
 }
 
@@ -225,6 +225,6 @@ exports.searchPlaces = async (req, res) => {
     res.json({ success: true, data })
   } catch (error) {
     console.error('Error en searchPlaces:', error.message)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al buscar lugares' })
   }
 }

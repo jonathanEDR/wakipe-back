@@ -127,8 +127,8 @@ const getSuggestions = async (req, res) => {
       status: 'disponible',
       author: { $ne: user._id },
     }
-    if (req.query.product) filter.product = req.query.product
-    if (req.query.departamento) filter['location.departamento'] = req.query.departamento
+    if (req.query.product && typeof req.query.product === 'string') filter.product = String(req.query.product)
+    if (req.query.departamento && typeof req.query.departamento === 'string') filter['location.departamento'] = String(req.query.departamento)
 
     // 4) Excluir publicaciones ya contactadas (salvo que se pida explícitamente)
     const includeContacted = req.query.includeContacted === 'true'

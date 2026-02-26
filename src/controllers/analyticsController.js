@@ -127,7 +127,7 @@ exports.getOverview = async (req, res) => {
     })
   } catch (error) {
     console.error('Error en getOverview:', error)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener resumen analítico' })
   }
 }
 
@@ -186,7 +186,7 @@ exports.getTrends = async (req, res) => {
     })
   } catch (error) {
     console.error('Error en getTrends:', error)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener tendencias' })
   }
 }
 
@@ -228,7 +228,7 @@ exports.getTopProducts = async (req, res) => {
     })
   } catch (error) {
     console.error('Error en getTopProducts:', error)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener productos principales' })
   }
 }
 
@@ -282,6 +282,6 @@ exports.getLocationStats = async (req, res) => {
     })
   } catch (error) {
     console.error('Error en getLocationStats:', error)
-    res.status(500).json({ success: false, message: error.message })
+    res.status(500).json({ success: false, message: 'Error al obtener estadísticas de ubicación' })
   }
 }

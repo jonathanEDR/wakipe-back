@@ -10,7 +10,13 @@
 
 require('dotenv').config()
 const mongoose = require('mongoose')
+const readline = require('readline')
 const User = require('../src/models/User')
+
+// Helper: escapar regex
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 const email = process.argv[2]
 
@@ -22,12 +28,14 @@ if (!email) {
 
 async function run() {
   try {
-    console.log(`\n🔌  Conectando a MongoDB: ${process.env.MONGO_URI}`)
+    // SEGURIDAD: no logear la URI de conexión (contiene credenciales)
+    console.log('\n🔌  Conectando a MongoDB...')
     await mongoose.connect(process.env.MONGO_URI)
     console.log('✅  Conectado.\n')
 
-    // Buscar por email (exacto, case-insensitive)
-    const user = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } })
+    // Buscar por email (exacto, case-insensitive, con regex escapado)
+    const safeEmail = escapeRegex(email)
+    const user = await User.findOne({ email: { $regex: new RegExp(`^${safeEmail}$`, 'i') } })
 
     if (!user) {
       console.error(`❌  No se encontró ningún usuario con email: ${email}`)
@@ -36,6 +44,24 @@ async function run() {
     }
 
     const rolAnterior = user.role || '(sin rol)'
+
+    // Confirmación interactiva
+    console.log(`⚠️  Vas a promover a super_admin:`);
+    console.log(`   Nombre  : ${user.name || 'Sin nombre'}`);
+    console.log(`   Email   : ${user.email}`);
+    console.log(`   Rol actual: ${rolAnterior}\n`);
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise(resolve => {
+      rl.question('¿Confirmar? (s/N): ', resolve);
+    });
+    rl.close();
+
+    if (answer.toLowerCase() !== 's') {
+      console.log('\n❌  Operación cancelada.');
+      process.exit(0);
+    }
+
     user.role = 'super_admin'
     await user.save()
 

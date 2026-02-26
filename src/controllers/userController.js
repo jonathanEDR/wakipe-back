@@ -58,7 +58,7 @@ exports.setRole = async (req, res) => {
     console.error("Error en setRole:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al establecer rol',
     });
   }
 };
@@ -128,7 +128,7 @@ exports.updateProfile = async (req, res) => {
     console.error("Error en updateProfile:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al actualizar perfil',
     });
   }
 };
@@ -161,7 +161,16 @@ exports.getUsersByRole = async (req, res) => {
       filter['location.distrito'] = distrito;
     }
 
-    const users = await User.find(filter).select('-clerkId');
+    // Solo roles válidos (no permitir admin/super_admin en esta ruta)
+    const publicRoles = ['productor', 'centro_acopio'];
+    if (!publicRoles.includes(filter.role)) {
+      return res.status(400).json({ success: false, message: 'Rol inválido' });
+    }
+
+    // Solo campos públicos
+    const users = await User.find({ ...filter, isBanned: { $ne: true } }).select(
+      'name avatar role verified location.departamento location.provincia location.distrito products farmSize institution institutionType coverageArea createdAt'
+    );
     
     res.json({
       success: true,
@@ -169,10 +178,10 @@ exports.getUsersByRole = async (req, res) => {
       data: users
     });
   } catch (error) {
-    console.error("Error en getUsersByRole:", error.message);
+    console.error('Error en getUsersByRole:', error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al obtener usuarios por rol',
     });
   }
 };
@@ -233,7 +242,7 @@ exports.verifyUser = async (req, res) => {
     console.error("Error en verifyUser:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al verificar usuario',
     });
   }
 };
@@ -292,7 +301,7 @@ exports.banUser = async (req, res) => {
     console.error("Error en banUser:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al gestionar baneo de usuario',
     });
   }
 };
@@ -334,7 +343,7 @@ exports.promoteToAdmin = async (req, res) => {
     console.error("Error en promoteToAdmin:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al promover usuario',
     });
   }
 };
@@ -376,7 +385,7 @@ exports.syncUser = async (req, res) => {
     console.error("Error:", error.message);
     res.status(400).json({
       success: false,
-      message: error.message,
+      message: 'Error al sincronizar perfil',
     });
   }
 };
@@ -402,7 +411,7 @@ exports.getMyProfile = async (req, res) => {
     console.error("Error:", error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al obtener perfil',
     });
   }
 };
@@ -413,15 +422,17 @@ exports.getMyProfile = async (req, res) => {
  */
 exports.getUserById = async (req, res) => {
   try {
+    // Solo exponer campos públicos — nunca email, phone, clerkId, matchPreferences
     const user = await User.findById(req.params.id).select(
-      '-clerkId -isBanned -bannedReason -verifiedBy'
+      'name avatar role verified location.departamento location.provincia location.distrito products farmSize institution institutionType coverageArea createdAt'
     );
     if (!user) {
       return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
     }
     res.json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('Error getUserById:', error.message);
+    res.status(500).json({ success: false, message: 'Error al obtener perfil' });
   }
 };
 
@@ -431,17 +442,20 @@ exports.getUserById = async (req, res) => {
  */
 exports.getUsers = async (req, res) => {
   try {
-    const users = await User.find().select('-clerkId');
+    // Solo campos públicos — nunca email, phone, clerkId, matchPreferences
+    const users = await User.find({ isBanned: { $ne: true } }).select(
+      'name avatar role verified location.departamento location.provincia location.distrito products farmSize institution institutionType coverageArea createdAt'
+    );
     res.json({
       success: true,
       count: users.length,
       data: users,
     });
   } catch (error) {
-    console.error("Error:", error.message);
+    console.error('Error getUsers:', error.message);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: 'Error al obtener usuarios',
     });
   }
 };
@@ -473,6 +487,6 @@ exports.updateMatchPreferences = async (req, res) => {
     res.json({ success: true, data: user.matchPreferences });
   } catch (error) {
     console.error('Error updateMatchPreferences:', error.message);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: 'Error al actualizar preferencias' });
   }
 };
