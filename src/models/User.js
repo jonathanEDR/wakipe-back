@@ -104,6 +104,25 @@ const userSchema = new mongoose.Schema(
       type: String,
     },
     
+    // Solicitud de verificación
+    verification: {
+      status: {
+        type: String,
+        enum: ['none', 'pending', 'approved', 'rejected'],
+        default: 'none',
+      },
+      submittedAt: { type: Date, default: null },
+      reviewedAt:  { type: Date, default: null },
+      reviewedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      rejectionReason: { type: String, default: null },
+      documents: {
+        dni:     [{ publicId: String, url: String }],
+        ruc:     [{ publicId: String, url: String }],
+        local:   [{ publicId: String, url: String }],
+        license: [{ publicId: String, url: String }],
+      },
+    },
+
     // Estado de la cuenta
     isActive: {
       type: Boolean,

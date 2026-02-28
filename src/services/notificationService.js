@@ -104,6 +104,14 @@ const TEMPLATES = {
     link: '/dashboard'
   }),
 
+  verificacion_rechazada: ({ reason }) => ({
+    title: 'Verificación rechazada',
+    body: reason ? `Tu solicitud fue rechazada: ${reason}` : 'Tu solicitud de verificación fue rechazada. Puedes corregir y volver a enviar.',
+    icon: '❌',
+    priority: 'high',
+    link: '/dashboard/user'
+  }),
+
   usuario_baneado: ({ reason }) => ({
     title: 'Cuenta suspendida ⚠️',
     body: reason

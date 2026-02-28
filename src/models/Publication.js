@@ -100,6 +100,7 @@ const publicationSchema = new mongoose.Schema(
         height: { type: Number },
       },
     ],
+
   },
   {
     timestamps: true,  // createdAt, updatedAt

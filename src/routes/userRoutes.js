@@ -38,13 +38,31 @@ router.put("/profile", requireAuth, getUser, loadUser, userController.updateProf
 router.put("/match-preferences", requireAuth, getUser, loadUser, userController.updateMatchPreferences);
 
 // ============================================
+// VERIFICACIÓN DE USUARIOS (solicitud)
+// ============================================
+
+// Usuario envía solicitud de verificación
+router.post("/verify/submit", requireAuth, getUser, loadUser, userController.submitVerification);
+
+// Admin: listar solicitudes pendientes
+router.get("/verify/requests", requireAuth, getUser, requireAdmin, userController.getVerificationRequests);
+
+// ============================================
 // RUTAS DE ADMINISTRACIÓN (solo admin o super_admin)
 // ============================================
 
-// Verificar/desverificar usuario
-router.get("/:id/public", requireAuth, getUser, userController.getUserById);
+// Obtener todos los usuarios para administración (incluye todos los roles y campos extendidos)
+router.get("/admin/all", requireAuth, getUser, requireAdmin, userController.getAdminUsers);
 
+// Perfil público de usuario (no requiere autenticación)
+router.get("/:id/public", userController.getUserById);
+
+// Verificar/desverificar usuario (toggle manual)
 router.put("/:id/verify", requireAuth, getUser, requireAdmin, userController.verifyUser);
+
+// Aprobar/rechazar solicitud de verificación
+router.put("/:id/verify/approve", requireAuth, getUser, requireAdmin, userController.approveVerification);
+router.put("/:id/verify/reject", requireAuth, getUser, requireAdmin, userController.rejectVerification);
 
 // ============================================
 // RUTAS DE SUPER ADMINISTRADOR

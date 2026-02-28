@@ -247,6 +247,178 @@ exports.verifyUser = async (req, res) => {
   }
 };
 
+// ============================================
+// SOLICITUD DE VERIFICACIÓN (USUARIO)
+// ============================================
+
+/**
+ * Enviar solicitud de verificación con documentos.
+ * POST /api/users/verify/submit
+ */
+exports.submitVerification = async (req, res) => {
+  try {
+    const user = await User.findOne({ clerkId: req.userId })
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' })
+    }
+
+    if (!['productor', 'centro_acopio'].includes(user.role)) {
+      return res.status(403).json({ success: false, message: 'Solo productores y centros de acopio pueden solicitar verificación' })
+    }
+
+    if (user.verification?.status === 'pending') {
+      return res.status(400).json({ success: false, message: 'Ya tienes una solicitud de verificación en revisión' })
+    }
+
+    if (user.verified && user.verification?.status === 'approved') {
+      return res.status(400).json({ success: false, message: 'Tu cuenta ya está verificada' })
+    }
+
+    const { documents } = req.body
+    if (!documents) {
+      return res.status(400).json({ success: false, message: 'Debes enviar documentos' })
+    }
+
+    // Validar según rol
+    if (!documents.dni || documents.dni.length === 0) {
+      return res.status(400).json({ success: false, message: 'Debes subir al menos una foto de tu DNI' })
+    }
+    if (!documents.local || documents.local.length === 0) {
+      return res.status(400).json({ success: false, message: 'Debes subir al menos una foto de tu terreno o local' })
+    }
+
+    if (user.role === 'centro_acopio') {
+      if (!documents.ruc || documents.ruc.length === 0) {
+        return res.status(400).json({ success: false, message: 'Los centros de acopio deben subir foto de su ficha RUC' })
+      }
+      if (!documents.license || documents.license.length === 0) {
+        return res.status(400).json({ success: false, message: 'Los centros de acopio deben subir foto de su licencia o permiso' })
+      }
+    }
+
+    user.verification = {
+      status: 'pending',
+      submittedAt: new Date(),
+      reviewedAt: null,
+      reviewedBy: null,
+      rejectionReason: null,
+      documents: {
+        dni: documents.dni.slice(0, 2),
+        ruc: user.role === 'centro_acopio' ? (documents.ruc || []).slice(0, 2) : [],
+        local: documents.local.slice(0, 3),
+        license: user.role === 'centro_acopio' ? (documents.license || []).slice(0, 2) : [],
+      },
+    }
+
+    await user.save()
+
+    res.json({
+      success: true,
+      message: 'Solicitud de verificación enviada correctamente',
+      data: { status: user.verification.status },
+    })
+  } catch (error) {
+    console.error('Error en submitVerification:', error.message)
+    res.status(500).json({ success: false, message: 'Error al enviar solicitud de verificación' })
+  }
+}
+
+/**
+ * Listar solicitudes de verificación pendientes (admin).
+ * GET /api/users/verify/requests
+ */
+exports.getVerificationRequests = async (req, res) => {
+  try {
+    const users = await User.find({ 'verification.status': 'pending' })
+      .select('name email avatar role phone location institution institutionType verified verification createdAt')
+      .sort({ 'verification.submittedAt': 1 })
+
+    res.json({ success: true, data: users })
+  } catch (error) {
+    console.error('Error en getVerificationRequests:', error.message)
+    res.status(500).json({ success: false, message: 'Error al obtener solicitudes' })
+  }
+}
+
+/**
+ * Aprobar verificación (admin).
+ * PUT /api/users/:id/verify/approve
+ */
+exports.approveVerification = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id)
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' })
+    }
+
+    if (user.verification?.status !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Este usuario no tiene solicitud pendiente' })
+    }
+
+    user.verification.status = 'approved'
+    user.verification.reviewedAt = new Date()
+    user.verification.reviewedBy = req.user._id
+    user.verification.rejectionReason = null
+    user.verified = true
+    user.verifiedBy = req.user._id
+    user.verifiedAt = new Date()
+
+    await user.save()
+
+    try {
+      await notificationService.createFromTemplate(user._id, 'usuario_verificado', {}, { verifiedBy: req.user._id })
+    } catch (err) {
+      console.error('[Verificación] Error al notificar aprobación:', err.message)
+    }
+
+    res.json({ success: true, message: 'Usuario verificado correctamente', data: user })
+  } catch (error) {
+    console.error('Error en approveVerification:', error.message)
+    res.status(500).json({ success: false, message: 'Error al aprobar verificación' })
+  }
+}
+
+/**
+ * Rechazar verificación (admin).
+ * PUT /api/users/:id/verify/reject
+ */
+exports.rejectVerification = async (req, res) => {
+  try {
+    const { reason } = req.body
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'Debes indicar una razón para el rechazo' })
+    }
+
+    const user = await User.findById(req.params.id)
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'Usuario no encontrado' })
+    }
+
+    if (user.verification?.status !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Este usuario no tiene solicitud pendiente' })
+    }
+
+    user.verification.status = 'rejected'
+    user.verification.reviewedAt = new Date()
+    user.verification.reviewedBy = req.user._id
+    user.verification.rejectionReason = reason
+    user.verified = false
+
+    await user.save()
+
+    try {
+      await notificationService.createFromTemplate(user._id, 'verificacion_rechazada', { reason })
+    } catch (err) {
+      console.error('[Verificación] Error al notificar rechazo:', err.message)
+    }
+
+    res.json({ success: true, message: 'Verificación rechazada', data: user })
+  } catch (error) {
+    console.error('Error en rejectVerification:', error.message)
+    res.status(500).json({ success: false, message: 'Error al rechazar verificación' })
+  }
+}
+
 /**
  * Banear/desbanear usuario (solo super_admin)
  * PUT /api/users/:id/ban
@@ -453,6 +625,31 @@ exports.getUsers = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getUsers:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Error al obtener usuarios',
+    });
+  }
+};
+
+/**
+ * Obtener todos los usuarios para administración (solo admin/super_admin)
+ * Incluye todos los roles y campos extendidos (email, phone, isBanned, verification).
+ * GET /api/users/admin/all
+ */
+exports.getAdminUsers = async (req, res) => {
+  try {
+    const users = await User.find({}).select(
+      'name email avatar role verified isBanned bannedReason phone location products farmSize institution institutionType coverageArea verification.status createdAt'
+    ).sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      count: users.length,
+      data: users,
+    });
+  } catch (error) {
+    console.error('Error getAdminUsers:', error.message);
     res.status(500).json({
       success: false,
       message: 'Error al obtener usuarios',

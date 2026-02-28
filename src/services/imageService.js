@@ -15,6 +15,7 @@ const FOLDERS = {
   avatars: 'wakipe/avatars',
   conversations: 'wakipe/conversations',
   general: 'wakipe/general',
+  verification: 'wakipe/verification',
 };
 
 // ─── Transformaciones predefinidas ───────────────────────────────────────────
@@ -92,7 +93,7 @@ const uploadMultiple = async (sources, options = {}) => {
  */
 const destroy = async (publicId) => {
   if (!publicId) throw new Error('publicId es requerido');
-  const result = await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
+  const result = await cloudinary.uploader.destroy(publicId);
   return result;
 };
 
@@ -103,7 +104,7 @@ const destroy = async (publicId) => {
  */
 const destroyMultiple = async (publicIds) => {
   if (!publicIds || publicIds.length === 0) return { deleted: {} };
-  const result = await cloudinary.api.delete_resources(publicIds, { resource_type: 'image' });
+  const result = await cloudinary.api.delete_resources(publicIds);
   return result;
 };
 
