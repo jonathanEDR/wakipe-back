@@ -33,7 +33,7 @@ exports.createPublication = async (req, res) => {
       })
     }
 
-    const { product, quantity, unit, price, currency, availabilityDate, description, location } = req.body
+    const { product, quantity, unit, price, currency, availabilityDate, description, location, images } = req.body
 
     // Validaciones básicas
     if (!product || !quantity || !unit || !availabilityDate) {
@@ -90,6 +90,7 @@ exports.createPublication = async (req, res) => {
       description: description?.trim() || '',
       location: pubLocation,
       status: 'disponible',
+      images: Array.isArray(images) ? images.slice(0, 5) : [],
     })
 
     await publication.save()
@@ -293,7 +294,7 @@ exports.updatePublication = async (req, res) => {
       })
     }
 
-    const { product, quantity, unit, price, currency, availabilityDate, description, location } = req.body
+    const { product, quantity, unit, price, currency, availabilityDate, description, location, images } = req.body
 
     if (product) publication.product = product.trim()
     if (quantity) publication.quantity = quantity
